@@ -173,6 +173,7 @@ size_t Serial::write(const void* data, size_t length)
 #include <fcntl.h> // open() etc.
 #include <string.h> // strerror
 
+#include <sys/ioctl.h>
 #include <termios.h> // tcgetattr etc.
 #include <unistd.h>
 #include <chrono>
@@ -296,6 +297,9 @@ void Serial::configurePort()
 
 	// activate settings
 	::tcsetattr(_handle, TCSANOW, &settings);
+
+	if (ioctl(_handle, TIOCEXCL) != 0)
+		onError(); // TODO: "Could not the terminal into exclusive mode."
 }
 
 bool Serial::open()
