@@ -31,7 +31,7 @@ static int memfd_create(const char *name, unsigned int flags)
 
 #endif
 
-//! simple ring buffer base code leveraging virtual memory tricks
+//! simple ring buffer support code leveraging virtual memory tricks
 //!
 //! it maps the same physical memory twice into a contiguous virtual memory space
 struct RingBufferBase final
@@ -62,6 +62,8 @@ struct RingBufferBase final
 		// called twice
 		assert(!base);
 
+		physicalSize = size;
+
 #ifdef _WIN32
 
 		assert(size % 65536 == 0 && "size must be a multiple of 64k");
@@ -72,19 +74,20 @@ struct RingBufferBase final
 			return nullptr;
 
 		// find memory space large enough for both virtual copies
-		void* ptr = VirtualAlloc(nullptr, 2*size, MEM_RESERVE, PAGE_NOACCESS);
+		void* ptr = VirtualAlloc(nullptr, 2 * size, MEM_RESERVE, PAGE_NOACCESS);
 		if (!ptr)
+		{
+			free();
 			return nullptr;
+		}
 		VirtualFree(ptr, 0, MEM_RELEASE);
 
 		// map the buffer
-		base = (uint8_t *)MapViewOfFileEx(anonFileHandle, FILE_MAP_ALL_ACCESS, 0, 0, size, ptr);
-		if (base && MapViewOfFileEx(anonFileHandle, FILE_MAP_ALL_ACCESS, 0, 0, size, (char *)ptr + size))
-			physicalSize = size;
-		else
+		base = (uint8_t *)MapViewOfFileEx(anonFileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, ptr);
+		if (!base || !MapViewOfFileEx(anonFileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, (char *)ptr + size))
 			free();
 #else
-		assert (size % (size_t)getpagesize() == 0);
+		assert(size % (size_t)getpagesize() == 0);
 
 		// create anonymous file
 		anonFileHandle = memfd_create("ringbuffer", 0);
@@ -122,7 +125,7 @@ struct RingBufferBase final
 #else
 			::close(anonFileHandle);
 #endif
-			anonFileHandle = nullptr;
+			anonFileHandle = (native_handle)-1;
 		}
 		physicalSize = 0;
 	}
