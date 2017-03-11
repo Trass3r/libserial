@@ -9,4 +9,7 @@ if (NOT WIN32)
 	target_link_libraries(serial INTERFACE pthread)
 endif()
 
+add_library(bufferedserial STATIC bufferedserial.cpp ringbufferbase.h)
+target_link_libraries(bufferedserial PRIVATE serial)
+
 add_subdirectory(test)
