@@ -97,12 +97,17 @@ public:
 
 	bool isOpen() const;
 
+	//! set total timeout for read operations
+	//! 0 means return as soon as there is data
+	//! use uint maximum for blocking reads
 	void setTimeout(uint32_t timeoutMs);
 
-    size_t read(void* buf, size_t size);
+	//! reads between 1 and size bytes depending on the timeout
+	//! returns the number of bytes actually read
+	size_t read(void* buf, size_t size);
 
 	//! always blocks until a byte is read
-    uint8_t readByte();
+	uint8_t readByte();
 
 	size_t write(const void* data, size_t length);
 

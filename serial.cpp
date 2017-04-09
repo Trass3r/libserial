@@ -17,16 +17,6 @@ constexpr auto decay(E e)
 	return static_cast<std::underlying_type_t<E>>(e);
 }
 
-uint8_t Serial::readByte()
-{
-	uint8_t data = 0;
-	[[maybe_unused]]
-	size_t bytesRead = read(&data, 1);
-
-	assert(bytesRead == 1 && "readByte returned no data");
-	return data;
-}
-
 #ifdef _WIN32
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -137,7 +127,8 @@ void Serial::setTimeout(uint32_t timeoutMs)
 	_timeout = timeoutMs;
 
 	// setup timeouts
-	COMMTIMEOUTS timeout = { 0xFFFFFFFF, timeoutMs, 0, timeoutMs, 0 };
+	// TODO: figure out how to set these
+	COMMTIMEOUTS timeout = { timeoutMs == 0 ? 1 : 0xFFFFFFFF, 0, timeoutMs, 0, timeoutMs };
 	if (!SetCommTimeouts(_handle, &timeout))
 	{
 		assert(false && "could not set port timeout");
@@ -152,6 +143,15 @@ uint32_t Serial::bytesReady() const
 		bytesAvail = status.cbInQue;
 
 	return (uint32_t)bytesAvail;
+}
+
+uint8_t Serial::readByte()
+{
+	uint8_t data = 0;
+	[[maybe_unused]]
+	size_t bytesRead = read(&data, 1);
+	assert(bytesRead == 1 && "readByte returned no data");
+	return data;
 }
 
 size_t Serial::read(void* data, size_t length)
@@ -363,6 +363,18 @@ uint32_t Serial::bytesReady() const
 	return (uint32_t)bytesAvail;
 }
 
+uint8_t Serial::readByte()
+{
+	assert(isOpen());
+
+	// use ::read directly to avoid timing code overhead
+	uint8_t data = 0;
+	[[maybe_unused]]
+	ssize_t bytesRead = ::read(_handle, &data, 1);
+	assert(bytesRead > 0 && "read() returned no data");
+	return data;
+}
+
 size_t Serial::read(void* data, size_t length)
 {
 	assert(isOpen());
@@ -376,13 +388,13 @@ size_t Serial::read(void* data, size_t length)
 	while (bytesRead < length)
 	{
 		ssize_t n = ::read(_handle, (uint8_t*)data + bytesRead, length - bytesRead);
-		if (n > 0)
+		if (n >= 0)
 			bytesRead += (size_t)n;
 		else
 			onError();
 
 		if (_timeout == 0)
-			continue;
+			break;
 
 		auto diff = std::chrono::steady_clock::now() - start;
 		auto msecs = std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
