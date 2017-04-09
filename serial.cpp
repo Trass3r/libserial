@@ -144,6 +144,16 @@ void Serial::setTimeout(uint32_t timeoutMs)
 	}
 }
 
+uint32_t Serial::bytesReady() const
+{
+	int bytesAvail = 0;
+	COMSTAT status;
+	if (ClearCommError(_handle, nullptr, &status) != 0)
+		bytesAvail = status.cbInQue;
+
+	return (uint32_t)bytesAvail;
+}
+
 size_t Serial::read(void* data, size_t length)
 {
 	assert(isOpen());
@@ -343,6 +353,14 @@ bool Serial::isOpen() const
 void Serial::setTimeout(uint32_t timeoutMs)
 {
 	_timeout = timeoutMs;
+}
+
+uint32_t Serial::bytesReady() const
+{
+	int bytesAvail;
+	if (ioctl(_handle, FIONREAD, &bytesAvail) != 0)
+		return 0;
+	return (uint32_t)bytesAvail;
 }
 
 size_t Serial::read(void* data, size_t length)

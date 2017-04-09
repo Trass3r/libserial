@@ -121,6 +121,8 @@ public:
 		return write(&t, sizeof(T));
 	}
 
+	uint32_t bytesReady() const;
+
 private:
 	void onError() const;
 	void configurePort();
