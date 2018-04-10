@@ -31,19 +31,62 @@ static int memfd_create(const char *name, unsigned int flags)
 
 #endif
 
-//! simple ring buffer support code leveraging virtual memory tricks
-//!
-//! it maps the same physical memory twice into a contiguous virtual memory space
-struct RingBufferBase final
+struct SafeHandle final
 {
 #ifdef _WIN32
 	using native_handle = void*;
 #else
 	using native_handle = int;
 #endif
-	native_handle anonFileHandle = (native_handle)-1;
+	native_handle handle = 0;
+
+	SafeHandle(native_handle handle) : handle(handle) {}
+	SafeHandle(SafeHandle&& o) noexcept
+	{
+		handle = o.handle;
+		o.handle = 0;
+	}
+
+	void operator=(SafeHandle&& o) noexcept
+	{
+		reset();
+		handle = o.handle;
+		o.handle = 0;
+	}
+
+	void reset()
+	{
+		if (!handle)
+			return;
+
+#ifdef _WIN32
+		CloseHandle(handle);
+#else
+		close(handle);
+#endif
+
+		handle = 0;
+	}
+
+	~SafeHandle()
+	{
+		reset();
+	}
+
+	operator native_handle() const
+	{
+		return handle;
+	}
+};
+
+//! simple ring buffer support code leveraging virtual memory tricks
+//!
+//! it maps the same physical memory twice into a contiguous virtual memory space
+struct RingBufferBase final
+{
 	size_t   physicalSize = 0;
 	uint8_t* base = nullptr;
+	SafeHandle fileHandle;
 
 	explicit RingBufferBase(size_t bufSize = 64 * 1024)
 	{
@@ -69,37 +112,50 @@ struct RingBufferBase final
 		assert(size % 65536 == 0 && "size must be a multiple of 64k");
 
 		// create anonymous file
-		anonFileHandle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (uint64_t)size >> 32, size & 0xffffffff, nullptr);
-		if (!anonFileHandle)
+		SafeHandle anonFile = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (uint64_t)size >> 32, size & 0xffffffff, nullptr);
+		if (!anonFile)
 			return nullptr;
 
-		// find memory space large enough for both virtual copies
-		void* ptr = VirtualAlloc(nullptr, 2 * size, MEM_RESERVE, PAGE_NOACCESS);
+		void* ptr = nullptr;
+		for (uint32_t i = 0; i < 4; ++i)
+		{
+			// find memory space large enough for both virtual copies
+			ptr = VirtualAlloc(nullptr, 2 * size, MEM_RESERVE, PAGE_NOACCESS);
+			if (!ptr)
+			{
+				free();
+				return nullptr;
+			}
+			VirtualFree(ptr, 0, MEM_RELEASE);
+
+			// map the buffer
+			ptr = MapViewOfFileEx(fileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, ptr);
+			if (!ptr || !MapViewOfFileEx(fileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, (char *)ptr + size))
+				continue;
+		}
+
+		base = (uint8_t*)ptr;
 		if (!ptr)
 		{
 			free();
 			return nullptr;
 		}
-		VirtualFree(ptr, 0, MEM_RELEASE);
 
-		// map the buffer
-		base = (uint8_t *)MapViewOfFileEx(anonFileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, ptr);
-		if (!base || !MapViewOfFileEx(anonFileHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size, (char *)ptr + size))
-			free();
+		fileHandle = anonFile;
 #else
 		assert(size % (size_t)getpagesize() == 0);
 
 		// create anonymous file
-		anonFileHandle = memfd_create("ringbuffer", 0);
-		if (ftruncate(anonFileHandle, (__off_t)size) != 0)
+		fileHandle = memfd_create("ringbuffer", 0);
+		if (ftruncate(fileHandle, (__off_t)size) != 0)
 			return nullptr;
 
 		// find memory space large enough for both virtual copies
 		base = (uint8_t*)mmap(nullptr, 2 * size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
 		// map the buffer
-		mmap(base, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, anonFileHandle, 0);
-		mmap(base + size, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, anonFileHandle, 0);
+		mmap(base, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileHandle, 0);
+		mmap(base + size, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileHandle, 0);
 #endif
 		return base;
 	}
@@ -117,16 +173,7 @@ struct RingBufferBase final
 #endif
 			base = nullptr;
 		}
-
-		if (anonFileHandle)
-		{
-#ifdef _WIN32
-			CloseHandle(anonFileHandle);
-#else
-			::close(anonFileHandle);
-#endif
-			anonFileHandle = (native_handle)-1;
-		}
 		physicalSize = 0;
+		fileHandle.reset();
 	}
 };
