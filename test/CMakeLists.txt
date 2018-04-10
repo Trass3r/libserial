@@ -7,6 +7,9 @@ if (BUILD_TESTS)
 include_directories(..)
 add_library(testmain main.cpp)
 
+#add_executable(bufferedtest bufferedtest.cpp)
+#target_link_libraries(bufferedtest PRIVATE bufferedserial)
+
 add_executable(ringbuffertest ringbuffertest.cpp)
 target_link_libraries(ringbuffertest PRIVATE testmain)
 

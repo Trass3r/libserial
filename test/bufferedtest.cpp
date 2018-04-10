@@ -1,4 +1,10 @@
 
+#include "serial.h"
+
+#include <cstdint>
+#include <ostream>
+#include <iostream>
+
 int main(int argc, const char** argv)
 {
 	Serial serial(port, baudrate);
